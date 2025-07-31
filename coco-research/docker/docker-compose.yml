@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15
+    container_name: coco-postgres
+    environment:
+      POSTGRES_DB: coco_research
+      POSTGRES_USER: coco
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - coco-network
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: coco-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - coco-network
+
+  # Elasticsearch
+  elasticsearch:
+    image: elasticsearch:8.11
+    container_name: coco-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - coco-network
+
+  # Research Agent服务
+  research-agent:
+    build:
+      context: ../research-agent
+      dockerfile: Dockerfile
+    container_name: coco-research-agent
+    environment:
+      - DB_HOST=postgres
+      - REDIS_HOST=redis
+      - ES_HOST=elasticsearch
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - coco-network
+
+  # Tool Service服务
+  tool-service:
+    build:
+      context: ../tool-service
+      dockerfile: Dockerfile
+    container_name: coco-tool-service
+    environment:
+      - DATABASE_URL=postgresql://coco:password@postgres:5432/coco_research
+      - REDIS_HOST=redis
+      - ES_HOSTS=http://elasticsearch:9200
+    ports:
+      - "1601:1601"
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - coco-network
+
+  # 前端服务
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: coco-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - research-agent
+    networks:
+      - coco-network
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: coco-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - research-agent
+      - tool-service
+      - frontend
+    networks:
+      - coco-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  es_data:
+
+networks:
+  coco-network:
+    driver: bridge 
