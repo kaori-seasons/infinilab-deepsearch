@@ -28,6 +28,12 @@ func SetupRoutes(r *gin.Engine, agentManager *agent.AgentManager) {
 		agents.PUT("/:id/mode", agentHandler.SwitchAgentMode)     // 切换智能体模式
 		agents.GET("/:id/state", agentHandler.GetAgentState)      // 获取智能体状态
 		agents.GET("/statistics", agentHandler.GetAgentStatistics) // 获取智能体统计信息
+		
+		// 增强功能路由
+		agents.POST("/enhanced/search", agentHandler.ExecuteEnhancedSearch)           // 执行增强搜索
+		agents.GET("/enhanced/user/:user_id/interest", agentHandler.GetUserInterest) // 获取用户兴趣
+		agents.PUT("/enhanced/user/:user_id/interest", agentHandler.UpdateUserInterest) // 更新用户兴趣
+		agents.GET("/enhanced/search/stats", agentHandler.GetSearchStats)            // 获取搜索统计信息
 	}
 	
 	// 会话相关路由

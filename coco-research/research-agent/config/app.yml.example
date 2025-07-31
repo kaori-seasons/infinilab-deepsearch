@@ -70,6 +70,45 @@ llm:
     max_length: 512
     dimension: 768
 
+# 向量搜索配置
+vector_search:
+  # 用户兴趣配置
+  user_interest:
+    cache_ttl: "30m"
+    update_interval: "1h"
+    max_categories: 5
+    confidence_threshold: 0.5
+  
+  # 混合搜索配置
+  hybrid_search:
+    vector_weight: 0.4
+    text_weight: 0.3
+    rerank_weight: 0.3
+    max_candidates: 100
+    rerank_limit: 20
+    similarity_threshold: 0.7
+  
+  # BGE模型配置
+  bge_model:
+    model_path: "BAAI/bge-m3"
+    device: "cpu"  # cpu, cuda
+    batch_size: 32
+    max_length: 512
+  
+  # 重排序配置
+  rerank:
+    content_relevance_weight: 0.4
+    user_preference_weight: 0.3
+    freshness_weight: 0.1
+    quality_weight: 0.1
+    popularity_weight: 0.1
+  
+  # 缓存配置
+  cache:
+    default_expiration: "15m"
+    cleanup_interval: "5m"
+    max_size: 1000
+
 # 日志配置
 log:
   level: info

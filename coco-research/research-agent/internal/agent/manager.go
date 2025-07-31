@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coco-ai/research-agent/internal/search"
+	"github.com/coco-ai/research-agent/internal/user"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -26,13 +28,16 @@ const (
 	AgentModeResearch     AgentMode = "research"      // 研究模式
 	AgentModeReact        AgentMode = "react"         // React模式
 	AgentModePlanExecute  AgentMode = "plan_execute"  // Plan-and-Execute模式
+	AgentModeEnhanced     AgentMode = "enhanced"      // 增强模式（支持用户兴趣）
 )
 
 // AgentManager 智能体管理器
 type AgentManager struct {
-	agents map[uuid.UUID]Agent
-	mutex  sync.RWMutex
-	logger *logrus.Entry
+	agents             map[uuid.UUID]Agent
+	interestCalculator *user.InterestCentroidCalculator
+	searchEngine       *search.HybridSearchEngine
+	mutex              sync.RWMutex
+	logger             *logrus.Entry
 }
 
 // AgentInfo 智能体信息
@@ -56,10 +61,12 @@ type CreateAgentRequest struct {
 }
 
 // NewAgentManager 创建智能体管理器
-func NewAgentManager() *AgentManager {
+func NewAgentManager(interestCalculator *user.InterestCentroidCalculator, searchEngine *search.HybridSearchEngine) *AgentManager {
 	return &AgentManager{
-		agents: make(map[uuid.UUID]Agent),
-		logger: logrus.WithField("component", "agent_manager"),
+		agents:             make(map[uuid.UUID]Agent),
+		interestCalculator: interestCalculator,
+		searchEngine:       searchEngine,
+		logger:             logrus.WithField("component", "agent_manager"),
 	}
 }
 
@@ -94,6 +101,15 @@ func (manager *AgentManager) CreateAgent(req CreateAgentRequest) (*AgentInfo, er
 		researchAgent.Name = req.Name
 		researchAgent.Description = req.Description
 		agent = researchAgent
+		
+	case AgentModeEnhanced:
+		// 创建增强的智能体
+		baseAgent := NewResearchAgent()
+		baseAgent.Name = req.Name
+		baseAgent.Description = req.Description
+		
+		enhancedAgent := NewEnhancedAgent(baseAgent, manager.interestCalculator, manager.searchEngine, "default_user")
+		agent = enhancedAgent
 		
 	default:
 		return nil, fmt.Errorf("unsupported agent mode: %s", req.Mode)

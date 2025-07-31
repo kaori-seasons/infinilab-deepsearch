@@ -9,14 +9,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coco-ai/research-agent/internal/agent"
-	"github.com/coco-ai/research-agent/pkg/logger"
+	"github.com/coco-ai/research-agent/internal/types"
 	"github.com/sirupsen/logrus"
 )
 
 // Client LLM客户端接口
 type Client interface {
-	Chat(ctx context.Context, messages []agent.Message, options *agent.LLMOptions) (string, error)
+	Chat(ctx context.Context, messages []types.Message, options *types.LLMOptions) (string, error)
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
@@ -185,7 +184,7 @@ func NewDeepSeekClient(apiKey string) *DeepSeekClient {
 }
 
 // Chat OpenAI聊天
-func (c *OpenAIClient) Chat(ctx context.Context, messages []agent.Message, options *agent.LLMOptions) (string, error) {
+func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, options *LLMOptions) (string, error) {
 	// 转换消息格式
 	openAIMessages := make([]OpenAIMessage, len(messages))
 	for i, msg := range messages {
@@ -197,32 +196,28 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []agent.Message, optio
 
 	// 构建请求
 	request := OpenAIRequest{
-		Model:       options.Model,
+		Model:       c.model,
 		Messages:    openAIMessages,
 		MaxTokens:   options.MaxTokens,
 		Temperature: options.Temperature,
+		Stream:      options.Stream,
 	}
 
 	// 发送请求
 	response, err := c.sendRequest(ctx, "/chat/completions", request)
 	if err != nil {
-		return "", fmt.Errorf("OpenAI API request failed: %w", err)
+		return "", fmt.Errorf("failed to send chat request: %w", err)
 	}
 
 	// 解析响应
 	var openAIResponse OpenAIResponse
-	err = json.Unmarshal(response, &openAIResponse)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse OpenAI response: %w", err)
+	if err := json.Unmarshal(response, &openAIResponse); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if len(openAIResponse.Choices) == 0 {
-		return "", fmt.Errorf("no choices in OpenAI response")
+		return "", fmt.Errorf("no choices in response")
 	}
-
-	c.logger.Info("OpenAI chat completed", 
-		"model", options.Model,
-		"tokens", openAIResponse.Usage.TotalTokens)
 
 	return openAIResponse.Choices[0].Message.Content, nil
 }
@@ -303,7 +298,7 @@ func (c *OpenAIClient) sendRequest(ctx context.Context, endpoint string, request
 }
 
 // Chat Claude聊天
-func (c *ClaudeClient) Chat(ctx context.Context, messages []agent.Message, options *agent.LLMOptions) (string, error) {
+func (c *ClaudeClient) Chat(ctx context.Context, messages []Message, options *LLMOptions) (string, error) {
 	// 转换消息格式
 	claudeMessages := make([]ClaudeMessage, len(messages))
 	for i, msg := range messages {
@@ -315,32 +310,27 @@ func (c *ClaudeClient) Chat(ctx context.Context, messages []agent.Message, optio
 
 	// 构建请求
 	request := ClaudeRequest{
-		Model:       options.Model,
+		Model:       c.model,
 		Messages:    claudeMessages,
 		MaxTokens:   options.MaxTokens,
 		Temperature: options.Temperature,
 	}
 
 	// 发送请求
-	response, err := c.sendRequest(ctx, "/messages", request)
+	response, err := c.sendRequest(ctx, "/v1/messages", request)
 	if err != nil {
-		return "", fmt.Errorf("Claude API request failed: %w", err)
+		return "", fmt.Errorf("failed to send chat request: %w", err)
 	}
 
 	// 解析响应
 	var claudeResponse ClaudeResponse
-	err = json.Unmarshal(response, &claudeResponse)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse Claude response: %w", err)
+	if err := json.Unmarshal(response, &claudeResponse); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if len(claudeResponse.Content) == 0 {
-		return "", fmt.Errorf("no content in Claude response")
+		return "", fmt.Errorf("no content in response")
 	}
-
-	c.logger.Info("Claude chat completed", 
-		"model", options.Model,
-		"tokens", claudeResponse.Usage.OutputTokens)
 
 	return claudeResponse.Content[0].Text, nil
 }
@@ -422,7 +412,7 @@ func (c *ClaudeClient) sendRequest(ctx context.Context, endpoint string, request
 }
 
 // Chat DeepSeek聊天
-func (c *DeepSeekClient) Chat(ctx context.Context, messages []agent.Message, options *agent.LLMOptions) (string, error) {
+func (c *DeepSeekClient) Chat(ctx context.Context, messages []Message, options *LLMOptions) (string, error) {
 	// 转换消息格式
 	deepSeekMessages := make([]DeepSeekMessage, len(messages))
 	for i, msg := range messages {
@@ -434,32 +424,28 @@ func (c *DeepSeekClient) Chat(ctx context.Context, messages []agent.Message, opt
 
 	// 构建请求
 	request := DeepSeekRequest{
-		Model:       options.Model,
+		Model:       c.model,
 		Messages:    deepSeekMessages,
 		MaxTokens:   options.MaxTokens,
 		Temperature: options.Temperature,
+		Stream:      options.Stream,
 	}
 
 	// 发送请求
 	response, err := c.sendRequest(ctx, "/chat/completions", request)
 	if err != nil {
-		return "", fmt.Errorf("DeepSeek API request failed: %w", err)
+		return "", fmt.Errorf("failed to send chat request: %w", err)
 	}
 
 	// 解析响应
 	var deepSeekResponse DeepSeekResponse
-	err = json.Unmarshal(response, &deepSeekResponse)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse DeepSeek response: %w", err)
+	if err := json.Unmarshal(response, &deepSeekResponse); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if len(deepSeekResponse.Choices) == 0 {
-		return "", fmt.Errorf("no choices in DeepSeek response")
+		return "", fmt.Errorf("no choices in response")
 	}
-
-	c.logger.Info("DeepSeek chat completed", 
-		"model", options.Model,
-		"tokens", deepSeekResponse.Usage.TotalTokens)
 
 	return deepSeekResponse.Choices[0].Message.Content, nil
 }

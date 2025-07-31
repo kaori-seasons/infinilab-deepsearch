@@ -169,7 +169,7 @@ func registerTestTools(collection *tool.Collection) {
 // MockLLMClient 模拟LLM客户端
 type MockLLMClient struct{}
 
-func (m *MockLLMClient) Chat(ctx context.Context, messages []agent.Message, options *agent.LLMOptions) (string, error) {
+func (m *MockLLMClient) Chat(ctx context.Context, messages []llm.Message, options *llm.LLMOptions) (string, error) {
 	lastMessage := messages[len(messages)-1].Content
 
 	// 针对Plan-and-Execute的计划制定

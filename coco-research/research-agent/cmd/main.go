@@ -16,7 +16,9 @@ import (
 	"github.com/coco-ai/research-agent/internal/database"
 	"github.com/coco-ai/research-agent/internal/llm"
 	"github.com/coco-ai/research-agent/internal/memory"
+	"github.com/coco-ai/research-agent/internal/search"
 	"github.com/coco-ai/research-agent/internal/tool"
+	"github.com/coco-ai/research-agent/internal/user"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -105,8 +107,26 @@ func main() {
 	// 注册默认工具
 	registerDefaultTools(toolCollection, cfg)
 
+	// 初始化用户兴趣计算器
+	interestCalculator := user.NewInterestCentroidCalculator(embeddingClient, memorySystem)
+	
+	// 初始化搜索配置
+	searchConfig := &search.SearchConfig{
+		IndexName:           "user_interests",
+		VectorField:         "interest_vector",
+		TextField:           "content",
+		MaxCandidates:       100,
+		RerankLimit:         20,
+		VectorWeight:        0.4,
+		TextWeight:          0.3,
+		SimilarityThreshold: 0.7,
+	}
+	
+	// 初始化混合搜索引擎
+	searchEngine := search.NewHybridSearchEngine(esClient, searchConfig)
+	
 	// 初始化智能体管理器
-	agentManager := agent.NewAgentManager()
+	agentManager := agent.NewAgentManager(interestCalculator, searchEngine)
 
 	// 创建Gin引擎
 	r := gin.New()
