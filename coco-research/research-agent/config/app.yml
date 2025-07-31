@@ -1,0 +1,49 @@
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+
+database:
+  host: localhost
+  port: 5432
+  user: coco
+  password: password
+  dbname: coco_research
+  sslmode: disable
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+elasticsearch:
+  hosts:
+    - "http://localhost:9200"
+  username: ""
+  password: ""
+
+llm:
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4"
+    max_tokens: 4096
+    temperature: 0.7
+  claude:
+    api_key: "${CLAUDE_API_KEY}"
+    base_url: "https://api.anthropic.com/v1"
+    model: "claude-3-sonnet-20240229"
+    max_tokens: 4096
+    temperature: 0.7
+  deepseek:
+    api_key: "${DEEPSEEK_API_KEY}"
+    base_url: "https://api.deepseek.com/v1"
+    model: "deepseek-chat"
+    max_tokens: 4096
+    temperature: 0.7
+
+log:
+  level: "info"
+  format: "json"
+  output: "stdout" 
