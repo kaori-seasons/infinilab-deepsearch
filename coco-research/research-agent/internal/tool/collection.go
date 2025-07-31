@@ -77,6 +77,19 @@ func (c *Collection) ListTools() []ToolInfo {
 	return tools
 }
 
+// GetAllTools 获取所有工具
+func (c *Collection) GetAllTools() []Tool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	tools := make([]Tool, 0, len(c.tools))
+	for _, tool := range c.tools {
+		tools = append(tools, tool)
+	}
+
+	return tools
+}
+
 // Execute 执行工具
 func (c *Collection) Execute(name string, input map[string]interface{}) (interface{}, error) {
 	tool, err := c.GetTool(name)

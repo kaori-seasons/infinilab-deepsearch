@@ -2,11 +2,10 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/coco-ai/research-agent/internal/agent"
-	"github.com/coco-ai/research-agent/internal/llm"
-	"github.com/coco-ai/research-agent/internal/memory"
-	"github.com/coco-ai/research-agent/internal/tool"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -14,26 +13,15 @@ import (
 
 // AgentHandler 智能体处理器
 type AgentHandler struct {
-	agentManager *agent.Manager
-	llmClient    llm.Client
-	memory       *memory.Memory
-	toolCollection *tool.Collection
+	agentManager *agent.AgentManager
 	logger       *logrus.Entry
 }
 
 // NewAgentHandler 创建智能体处理器
-func NewAgentHandler(
-	agentManager *agent.Manager,
-	llmClient llm.Client,
-	memory *memory.Memory,
-	toolCollection *tool.Collection,
-) *AgentHandler {
+func NewAgentHandler(agentManager *agent.AgentManager) *AgentHandler {
 	return &AgentHandler{
-		agentManager:   agentManager,
-		llmClient:      llmClient,
-		memory:         memory,
-		toolCollection: toolCollection,
-		logger:         logrus.WithField("component", "agent_handler"),
+		agentManager: agentManager,
+		logger:       logrus.WithField("component", "agent_handler"),
 	}
 }
 
@@ -44,18 +32,122 @@ func (h *AgentHandler) ListAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    agents,
-		"count":   len(agents),
+		"message": "智能体列表获取成功",
 	})
 }
 
-// GetAgent 获取智能体信息
+// GetAgent 获取智能体详情
 func (h *AgentHandler) GetAgent(c *gin.Context) {
-	agentID := c.Param("id")
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的智能体ID",
+		})
+		return
+	}
 	
 	agent, err := h.agentManager.GetAgent(agentID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
+			"message": "智能体不存在",
+		})
+		return
+	}
+	
+	// 构建智能体信息
+	agentInfo := agent.AgentInfo{
+		ID:          agentID,
+		Name:        agent.GetName(),
+		Description: agent.GetDescription(),
+		State:       agent.GetState(),
+		CreatedAt:   time.Now(), // 这里应该从智能体获取
+		UpdatedAt:   time.Now(), // 这里应该从智能体获取
+	}
+	
+	// 根据智能体类型设置Type和Mode
+	switch agent.(type) {
+	case *agent.ReactAgent:
+		agentInfo.Type = agent.AgentTypeReact
+		agentInfo.Mode = agent.AgentModeReact
+	case *agent.PlanExecuteAgent:
+		agentInfo.Type = agent.AgentTypePlanExecute
+		agentInfo.Mode = agent.AgentModePlanExecute
+	case *agent.ResearchAgent:
+		agentInfo.Type = agent.AgentTypeResearch
+		agentInfo.Mode = agent.AgentModeResearch
+	default:
+		agentInfo.Type = agent.AgentTypeResearch
+		agentInfo.Mode = agent.AgentModeResearch
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    agentInfo,
+		"message": "智能体详情获取成功",
+	})
+}
+
+// CreateAgent 创建智能体
+func (h *AgentHandler) CreateAgent(c *gin.Context) {
+	var req agent.CreateAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数无效",
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	agentInfo, err := h.agentManager.CreateAgent(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "创建智能体失败",
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    agentInfo,
+		"message": "智能体创建成功",
+	})
+}
+
+// ExecuteAgent 执行智能体
+func (h *AgentHandler) ExecuteAgent(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的智能体ID",
+		})
+		return
+	}
+	
+	var req struct {
+		Query string `json:"query" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数无效",
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	result, err := h.agentManager.ExecuteAgent(c.Request.Context(), agentID, req.Query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "智能体执行失败",
 			"error":   err.Error(),
 		})
 		return
@@ -64,174 +156,177 @@ func (h *AgentHandler) GetAgent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"id":          agent.GetName(),
-			"name":        agent.GetName(),
-			"description": agent.GetDescription(),
-			"state":       agent.GetState(),
+			"result": result,
 		},
+		"message": "智能体执行成功",
 	})
 }
 
-// CreateAgent 创建智能体
-func (h *AgentHandler) CreateAgent(c *gin.Context) {
-	var request struct {
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
-		Type        string `json:"type" binding:"required"`
-	}
-	
-	if err := c.ShouldBindJSON(&request); err != nil {
+// StepAgent 执行智能体单步
+func (h *AgentHandler) StepAgent(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
+			"message": "无效的智能体ID",
 		})
 		return
 	}
 	
-	// 根据类型创建智能体
-	var newAgent agent.Agent
-	switch request.Type {
-	case "research":
-		researchAgent := agent.NewResearchAgent()
-		researchAgent.LLMClient = h.llmClient
-		researchAgent.AvailableTools = h.toolCollection
-		researchAgent.Memory = h.memory
-		newAgent = researchAgent
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Unsupported agent type: " + request.Type,
-		})
-		return
-	}
-	
-	// 注册智能体
-	err := h.agentManager.RegisterAgent(newAgent)
+	result, err := h.agentManager.StepAgent(c.Request.Context(), agentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"error":   "Failed to register agent: " + err.Error(),
-		})
-		return
-	}
-	
-	h.logger.Info("Agent created", "name", request.Name, "type", request.Type)
-	
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"data": gin.H{
-			"id":          newAgent.GetName(),
-			"name":        newAgent.GetName(),
-			"description": newAgent.GetDescription(),
-			"type":        request.Type,
-		},
-	})
-}
-
-// ExecuteTask 执行智能体任务
-func (h *AgentHandler) ExecuteTask(c *gin.Context) {
-	agentID := c.Param("id")
-	
-	var request struct {
-		Query string `json:"query" binding:"required"`
-	}
-	
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-		})
-		return
-	}
-	
-	// 执行任务
-	task, err := h.agentManager.ExecuteTask(c.Request.Context(), agentID, request.Query)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to execute task: " + err.Error(),
-		})
-		return
-	}
-	
-	h.logger.Info("Task executed", "task_id", task.ID, "agent_id", agentID)
-	
-	c.JSON(http.StatusAccepted, gin.H{
-		"success": true,
-		"data": gin.H{
-			"task_id":  task.ID,
-			"agent_id": task.AgentID,
-			"status":   task.Status,
-			"query":    task.Query,
-		},
-	})
-}
-
-// GetTaskStatus 获取任务状态
-func (h *AgentHandler) GetTaskStatus(c *gin.Context) {
-	taskIDStr := c.Param("task_id")
-	
-	taskID, err := uuid.Parse(taskIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Invalid task ID: " + err.Error(),
-		})
-		return
-	}
-	
-	task, err := h.agentManager.GetTaskStatus(taskID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"error":   "Task not found: " + err.Error(),
+			"message": "智能体单步执行失败",
+			"error":   err.Error(),
 		})
 		return
 	}
 	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    task,
+		"data": gin.H{
+			"result": result,
+		},
+		"message": "智能体单步执行成功",
 	})
 }
 
 // StopAgent 停止智能体
 func (h *AgentHandler) StopAgent(c *gin.Context) {
-	agentID := c.Param("id")
-	
-	err := h.agentManager.StopAgent(agentID)
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "Failed to stop agent: " + err.Error(),
+			"message": "无效的智能体ID",
 		})
 		return
 	}
 	
-	h.logger.Info("Agent stopped", "agent_id", agentID)
+	err = h.agentManager.StopAgent(agentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "停止智能体失败",
+			"error":   err.Error(),
+		})
+		return
+	}
 	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Agent stopped successfully",
+		"message": "智能体已停止",
 	})
 }
 
-// GetAgentMetrics 获取智能体指标
-func (h *AgentHandler) GetAgentMetrics(c *gin.Context) {
-	metrics := h.agentManager.GetAgentMetrics()
+// DeleteAgent 删除智能体
+func (h *AgentHandler) DeleteAgent(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的智能体ID",
+		})
+		return
+	}
+	
+	err = h.agentManager.DeleteAgent(agentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "删除智能体失败",
+			"error":   err.Error(),
+		})
+		return
+	}
 	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    metrics,
+		"message": "智能体删除成功",
 	})
 }
 
-// HealthCheck 健康检查
-func (h *AgentHandler) HealthCheck(c *gin.Context) {
-	health := h.agentManager.HealthCheck()
+// SwitchAgentMode 切换智能体模式
+func (h *AgentHandler) SwitchAgentMode(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的智能体ID",
+		})
+		return
+	}
+	
+	var req struct {
+		Mode agent.AgentMode `json:"mode" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数无效",
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	err = h.agentManager.SwitchAgentMode(agentID, req.Mode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "切换智能体模式失败",
+			"error":   err.Error(),
+		})
+		return
+	}
 	
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    health,
+		"message": "智能体模式切换成功",
+	})
+}
+
+// GetAgentState 获取智能体状态
+func (h *AgentHandler) GetAgentState(c *gin.Context) {
+	agentIDStr := c.Param("id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的智能体ID",
+		})
+		return
+	}
+	
+	state, err := h.agentManager.GetAgentState(agentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "获取智能体状态失败",
+			"error":   err.Error(),
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"state": state,
+		},
+		"message": "智能体状态获取成功",
+	})
+}
+
+// GetAgentStatistics 获取智能体统计信息
+func (h *AgentHandler) GetAgentStatistics(c *gin.Context) {
+	stats := h.agentManager.GetAgentStatistics()
+	
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+		"message": "智能体统计信息获取成功",
 	})
 } 

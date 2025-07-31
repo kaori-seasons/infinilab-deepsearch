@@ -17,8 +17,8 @@ import (
 	"github.com/coco-ai/research-agent/internal/llm"
 	"github.com/coco-ai/research-agent/internal/memory"
 	"github.com/coco-ai/research-agent/internal/tool"
-	"github.com/coco-ai/research-agent/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -28,20 +28,22 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// 初始化日志
-	logConfig := logger.LogConfig{
-		Level:  cfg.Log.Level,
-		Format: cfg.Log.Format,
-		Output: cfg.Log.Output,
+	// 设置日志级别
+	if cfg.Server.Mode == "release" {
+		gin.SetMode(gin.ReleaseMode)
 	}
-	logger.Init(logConfig)
 
-	logger.Info("Starting Coco AI Research Agent", "version", "1.0.0")
+	// 初始化日志
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	if cfg.Server.Mode == "debug" {
+		logger.SetLevel(logrus.DebugLevel)
+	}
 
-	// 初始化数据库连接
+	// 连接数据库
 	db, err := database.Connect(&cfg.Database)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", "error", err)
+		logger.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer func() {
 		sqlDB, err := db.DB()
@@ -49,31 +51,6 @@ func main() {
 			sqlDB.Close()
 		}
 	}()
-
-	// 初始化LLM客户端
-	var llmClient llm.Client
-	switch cfg.LLM.Provider {
-	case "openai":
-		apiKey := cfg.LLM.APIKey
-		if apiKey == "" {
-			apiKey = cfg.LLM.OpenAI.APIKey
-		}
-		llmClient = llm.NewOpenAIClient(apiKey)
-	case "claude":
-		apiKey := cfg.LLM.APIKey
-		if apiKey == "" {
-			apiKey = cfg.LLM.Claude.APIKey
-		}
-		llmClient = llm.NewClaudeClient(apiKey)
-	case "deepseek":
-		apiKey := cfg.LLM.APIKey
-		if apiKey == "" {
-			apiKey = cfg.LLM.DeepSeek.APIKey
-		}
-		llmClient = llm.NewDeepSeekClient(apiKey)
-	default:
-		logger.Fatal("Unsupported LLM provider", "provider", cfg.LLM.Provider)
-	}
 
 	// 初始化嵌入模型客户端
 	embeddingClient, err := llm.NewEmbeddingClient(&cfg.LLM.Embedding)
@@ -93,9 +70,34 @@ func main() {
 		ESHosts:       cfg.ES.Hosts,
 		ESUsername:    cfg.ES.Username,
 		ESPassword:    cfg.ES.Password,
-		EnableVectorSearch: embeddingClient != nil, // 根据嵌入客户端是否可用决定是否启用向量搜索
+		EnableVectorSearch: embeddingClient != nil,
 	}
 	memorySystem := memory.NewMemory(memoryConfig, embeddingClient)
+
+	// 初始化LLM客户端
+	var llmClient llm.Client
+	switch cfg.LLM.Provider {
+	case "openai":
+		apiKey := cfg.LLM.APIKey
+		if apiKey == "" {
+			apiKey = cfg.LLM.OpenAI.APIKey
+		}
+		llmClient = llm.NewOpenAIClient(&cfg.LLM.OpenAI)
+	case "claude":
+		apiKey := cfg.LLM.APIKey
+		if apiKey == "" {
+			apiKey = cfg.LLM.Claude.APIKey
+		}
+		llmClient = llm.NewClaudeClient(&cfg.LLM.Claude)
+	case "deepseek":
+		apiKey := cfg.LLM.APIKey
+		if apiKey == "" {
+			apiKey = cfg.LLM.DeepSeek.APIKey
+		}
+		llmClient = llm.NewDeepSeekClient(&cfg.LLM.DeepSeek)
+	default:
+		logger.Fatalf("Unsupported LLM provider: %s", cfg.LLM.Provider)
+	}
 
 	// 初始化工具集合
 	toolCollection := tool.NewCollection()
@@ -104,36 +106,27 @@ func main() {
 	registerDefaultTools(toolCollection, cfg)
 
 	// 初始化智能体管理器
-	agentConfig := &agent.ManagerConfig{
-		MaxConcurrentAgents: 10,
-		AgentTimeout:        30 * time.Minute,
-		EnableMetrics:       true,
-	}
-	agentManager := agent.NewManager(agentConfig)
+	agentManager := agent.NewAgentManager()
 
-	// 注册默认智能体
-	registerDefaultAgents(agentManager, llmClient, memorySystem, toolCollection)
-
-	// 设置Gin模式
-	gin.SetMode(gin.ReleaseMode)
-
-	// 创建Gin路由器
-	router := gin.New()
+	// 创建Gin引擎
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
 
 	// 设置路由
-	api.SetupRoutes(router, agentManager, llmClient, memorySystem, toolCollection)
+	api.SetupRoutes(r, agentManager)
 
 	// 创建HTTP服务器
-	server := &http.Server{
+	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: router,
+		Handler: r,
 	}
 
 	// 启动服务器
 	go func() {
-		logger.Info("Starting HTTP server", "port", cfg.Server.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Failed to start server", "error", err)
+		logger.Info("Starting server", "port", cfg.Server.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
@@ -148,68 +141,52 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Fatal("Server forced to shutdown", "error", err)
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server forced to shutdown:", err)
 	}
 
 	logger.Info("Server exited")
 }
 
 // registerDefaultTools 注册默认工具
-func registerDefaultTools(toolCollection *tool.Collection, cfg *config.Config) {
-	// 注册网络搜索工具
-	apiKey := cfg.LLM.APIKey
-	if apiKey == "" {
-		// 根据提供商选择对应的API Key
-		switch cfg.LLM.Provider {
-		case "openai":
+func registerDefaultTools(collection *tool.Collection, cfg *config.Config) {
+	// 根据配置的LLM提供商选择API密钥
+	var apiKey string
+	switch cfg.LLM.Provider {
+	case "openai":
+		apiKey = cfg.LLM.APIKey
+		if apiKey == "" {
 			apiKey = cfg.LLM.OpenAI.APIKey
-		case "claude":
+		}
+	case "claude":
+		apiKey = cfg.LLM.APIKey
+		if apiKey == "" {
 			apiKey = cfg.LLM.Claude.APIKey
-		case "deepseek":
+		}
+	case "deepseek":
+		apiKey = cfg.LLM.APIKey
+		if apiKey == "" {
 			apiKey = cfg.LLM.DeepSeek.APIKey
 		}
 	}
-	webSearchTool := tool.NewWebSearchTool(apiKey) // 使用LLM API Key作为搜索API Key
-	toolCollection.AddTool(webSearchTool)
+
+	// 注册网络搜索工具
+	webSearchTool := tool.NewWebSearchTool(apiKey)
+	collection.RegisterTool(webSearchTool)
 
 	// 注册数据分析工具
 	dataAnalysisTool := tool.NewDataAnalysisTool()
-	toolCollection.AddTool(dataAnalysisTool)
+	collection.RegisterTool(dataAnalysisTool)
 
 	// 注册报告生成工具
 	reportGenerationTool := tool.NewReportGenerationTool()
-	toolCollection.AddTool(reportGenerationTool)
+	collection.RegisterTool(reportGenerationTool)
 
 	// 注册竞争对手分析工具
 	competitorAnalysisTool := tool.NewCompetitorAnalysisTool()
-	toolCollection.AddTool(competitorAnalysisTool)
+	collection.RegisterTool(competitorAnalysisTool)
 
 	// 注册趋势分析工具
 	trendAnalysisTool := tool.NewTrendAnalysisTool()
-	toolCollection.AddTool(trendAnalysisTool)
-
-	logger.Info("Default tools registered", "count", 5)
-}
-
-// registerDefaultAgents 注册默认智能体
-func registerDefaultAgents(
-	agentManager *agent.Manager,
-	llmClient llm.Client,
-	memory *memory.Memory,
-	toolCollection *tool.Collection,
-) {
-	// 创建研究智能体
-	researchAgent := agent.NewResearchAgent()
-	researchAgent.LLMClient = llmClient
-	researchAgent.AvailableTools = toolCollection
-	researchAgent.Memory = memory
-
-	// 注册智能体
-	err := agentManager.RegisterAgent(researchAgent)
-	if err != nil {
-		logger.Error("Failed to register research agent", "error", err)
-	}
-
-	logger.Info("Default agents registered", "count", 1)
+	collection.RegisterTool(trendAnalysisTool)
 } 

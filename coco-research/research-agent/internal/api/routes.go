@@ -3,81 +3,60 @@ package api
 import (
 	"github.com/coco-ai/research-agent/internal/agent"
 	"github.com/coco-ai/research-agent/internal/api/handlers"
-	"github.com/coco-ai/research-agent/internal/api/middleware"
-	"github.com/coco-ai/research-agent/internal/llm"
-	"github.com/coco-ai/research-agent/internal/memory"
-	"github.com/coco-ai/research-agent/internal/tool"
 	"github.com/gin-gonic/gin"
 )
 
 // SetupRoutes 设置路由
-func SetupRoutes(
-	r *gin.Engine,
-	agentManager *agent.Manager,
-	llmClient llm.Client,
-	memory *memory.Memory,
-	toolCollection *tool.Collection,
-) {
-	// 应用中间件
-	r.Use(middleware.CORS())
-	r.Use(middleware.RequestID())
-	r.Use(middleware.Logger())
-
-	// 健康检查
-	r.GET("/health", handlers.HealthCheck)
-
-	// API v1 路由组
+func SetupRoutes(r *gin.Engine, agentManager *agent.AgentManager) {
+	// API版本
 	v1 := r.Group("/api/v1")
+	
+	// 健康检查
+	v1.GET("/health", handlers.HealthCheck)
+	
+	// 智能体相关路由
+	agentHandler := handlers.NewAgentHandler(agentManager)
+	agents := v1.Group("/agents")
 	{
-		// 智能体相关路由
-		agents := v1.Group("/agents")
-		{
-			agentHandler := handlers.NewAgentHandler(agentManager, llmClient, memory, toolCollection)
-			
-			agents.GET("", agentHandler.ListAgents)
-			agents.POST("", agentHandler.CreateAgent)
-			agents.GET("/:id", agentHandler.GetAgent)
-			agents.POST("/:id/execute", agentHandler.ExecuteTask)
-			agents.GET("/tasks/:task_id", agentHandler.GetTaskStatus)
-			agents.POST("/:id/stop", agentHandler.StopAgent)
-			agents.GET("/metrics", agentHandler.GetAgentMetrics)
-			agents.GET("/health", agentHandler.HealthCheck)
-		}
-
-		// 工具相关路由
-		tools := v1.Group("/tools")
-		{
-			toolHandler := handlers.NewToolHandler(toolCollection)
-			
-			tools.GET("", toolHandler.ListTools)
-			tools.POST("", toolHandler.AddTool)
-			tools.GET("/:name", toolHandler.GetTool)
-			tools.POST("/:name/execute", toolHandler.ExecuteTool)
-			tools.DELETE("/:name", toolHandler.RemoveTool)
-		}
-
-		// 会话相关路由
-		sessions := v1.Group("/sessions")
-		{
-			sessions.GET("", handlers.GetSessions)
-			sessions.POST("", handlers.CreateSession)
-			sessions.GET("/:id", handlers.GetSession)
-			sessions.PUT("/:id", handlers.UpdateSession)
-			sessions.DELETE("/:id", handlers.DeleteSession)
-		}
-
-		// 任务相关路由
-		tasks := v1.Group("/tasks")
-		{
-			tasks.GET("", handlers.GetTasks)
-			tasks.POST("", handlers.CreateTask)
-			tasks.GET("/:id", handlers.GetTask)
-			tasks.PUT("/:id", handlers.UpdateTask)
-			tasks.DELETE("/:id", handlers.DeleteTask)
-			tasks.POST("/:id/execute", handlers.ExecuteTask)
-		}
-
-		// WebSocket 路由
-		v1.GET("/ws", handlers.WebSocketHandler)
+		agents.GET("", agentHandler.ListAgents)                    // 列出所有智能体
+		agents.POST("", agentHandler.CreateAgent)                  // 创建智能体
+		agents.GET("/:id", agentHandler.GetAgent)                 // 获取智能体详情
+		agents.DELETE("/:id", agentHandler.DeleteAgent)           // 删除智能体
+		agents.POST("/:id/execute", agentHandler.ExecuteAgent)    // 执行智能体
+		agents.POST("/:id/step", agentHandler.StepAgent)          // 执行智能体单步
+		agents.POST("/:id/stop", agentHandler.StopAgent)          // 停止智能体
+		agents.PUT("/:id/mode", agentHandler.SwitchAgentMode)     // 切换智能体模式
+		agents.GET("/:id/state", agentHandler.GetAgentState)      // 获取智能体状态
+		agents.GET("/statistics", agentHandler.GetAgentStatistics) // 获取智能体统计信息
+	}
+	
+	// 会话相关路由
+	sessionHandler := handlers.NewSessionHandler()
+	sessions := v1.Group("/sessions")
+	{
+		sessions.GET("", sessionHandler.ListSessions)           // 列出所有会话
+		sessions.POST("", sessionHandler.CreateSession)         // 创建会话
+		sessions.GET("/:id", sessionHandler.GetSession)        // 获取会话详情
+		sessions.PUT("/:id", sessionHandler.UpdateSession)     // 更新会话
+		sessions.DELETE("/:id", sessionHandler.DeleteSession)  // 删除会话
+	}
+	
+	// 任务相关路由
+	taskHandler := handlers.NewTaskHandler()
+	tasks := v1.Group("/tasks")
+	{
+		tasks.GET("", taskHandler.GetTasks)                    // 列出所有任务
+		tasks.GET("/:id", taskHandler.GetTask)                 // 获取任务详情
+		tasks.PUT("/:id", taskHandler.UpdateTask)              // 更新任务
+		tasks.DELETE("/:id", taskHandler.DeleteTask)           // 删除任务
+	}
+	
+	// 工具相关路由
+	toolHandler := handlers.NewToolHandler()
+	tools := v1.Group("/tools")
+	{
+		tools.GET("", toolHandler.ListTools)                   // 列出所有工具
+		tools.GET("/:name", toolHandler.GetTool)               // 获取工具详情
+		tools.POST("/:name/execute", toolHandler.ExecuteTool)  // 执行工具
 	}
 } 
